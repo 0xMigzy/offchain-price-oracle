@@ -1,0 +1,5 @@
+# Off-Chain Price Oracle
+
+Go services fetch prices from external APIs and submit them on-chain to a Solidity contract, using Kafka for queuing and Redis for caching.
+
+**Status:** Smart contract complete (55 tests, 100% coverage). Go services, Docker and CI in progress.
