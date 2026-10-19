@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/0xmigzy/capstone-worker/internal/cache"
 	"github.com/0xmigzy/capstone-worker/internal/chain"
 	"github.com/0xmigzy/capstone-worker/internal/retry"
 )
@@ -12,10 +13,11 @@ import (
 // OracleClient orchestrates oracle operations.
 type OracleClient struct {
 	chain *chain.Client
+	cache *cache.PriceCache
 }
 
-func NewOracleClient(c *chain.Client) *OracleClient {
-	return &OracleClient{chain: c}
+func NewOracleClient(c *chain.Client, pc *cache.PriceCache) *OracleClient {
+	return &OracleClient{chain: c, cache: pc}
 }
 
 // PriceUpdate represents a price to submit.
@@ -47,6 +49,28 @@ func (o *OracleClient) SubmitWithRetry(ctx context.Context, update PriceUpdate) 
 // GetLatest reads the latest price for a pair.
 func (o *OracleClient) GetLatest(ctx context.Context, pair string) (*big.Int, uint64, error) {
 	return o.chain.GetLatestPrice(ctx, pair)
+}
+
+func (o *OracleClient) GetLatestCached(ctx context.Context, pair string) (*big.Int, uint64, error) {
+	// Try cache first
+	price, ts, hit, err := o.cache.Get(ctx, pair)
+	if err != nil {
+		// Log error but fall through to RPC — cache failure shouldn't break reads
+	}
+	if hit {
+		return price, ts, nil
+	}
+
+	// Cache miss — go to chain
+	price, ts, err = o.chain.GetLatestPrice(ctx, pair)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	// Update cache (best-effort)
+	_ = o.cache.Set(ctx, pair, price, ts)
+
+	return price, ts, nil
 }
 
 // Close shuts down the client.

@@ -84,7 +84,7 @@ func (c *Client) SubmitPrice(ctx context.Context, pair string, price *big.Int) (
 // GetLatestPrice reads the latest price for a pair.
 func (c *Client) GetLatestPrice(ctx context.Context, pair string) (*big.Int, uint64, error) {
 	opts := &bind.CallOpts{Context: ctx}
-	price, ts, err := c.contract.GetLatestPrice(opts, pair)
+	price, ts, err := c.contract.GetLastPrice(opts, pair)
 	if err != nil {
 		return nil, 0, fmt.Errorf("get latest price: %w", err)
 	}

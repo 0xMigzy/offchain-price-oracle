@@ -2,7 +2,11 @@ module github.com/0xmigzy/capstone-worker
 
 go 1.27.0
 
-require github.com/ethereum/go-ethereum v1.17.5
+require (
+	github.com/ethereum/go-ethereum v1.17.5
+	github.com/redis/go-redis/v9 v9.22.0
+	github.com/segmentio/kafka-go v0.4.51
+)
 
 require (
 	github.com/Microsoft/go-winio v0.6.2 // indirect
@@ -23,6 +27,8 @@ require (
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/websocket v1.4.2 // indirect
 	github.com/holiman/uint256 v1.3.2 // indirect
+	github.com/klauspost/compress v1.17.11 // indirect
+	github.com/pierrec/lz4/v4 v4.1.15 // indirect
 	github.com/shirou/gopsutil v3.21.4-0.20210419000835-c7a38de76ee5+incompatible // indirect
 	github.com/supranational/blst v0.3.16 // indirect
 	github.com/tklauser/go-sysconf v0.3.12 // indirect
@@ -31,6 +37,7 @@ require (
 	go.opentelemetry.io/otel v1.41.0 // indirect
 	go.opentelemetry.io/otel/metric v1.41.0 // indirect
 	go.opentelemetry.io/otel/trace v1.41.0 // indirect
+	go.uber.org/atomic v1.11.0 // indirect
 	golang.org/x/crypto v0.48.0 // indirect
 	golang.org/x/sync v0.19.0 // indirect
 	golang.org/x/sys v0.41.0 // indirect

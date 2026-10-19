@@ -7,6 +7,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/0xmigzy/capstone-worker/internal/cache"
 	"github.com/0xmigzy/capstone-worker/internal/chain"
 	"github.com/0xmigzy/capstone-worker/internal/client"
 )
@@ -24,7 +25,8 @@ func main() {
 		log.Fatalf("create chain client: %v", err)
 	}
 
-	oracle := client.NewOracleClient(chainClient)
+	priceCache := cache.NewPriceCache("localhost:6379", 10*time.Second)
+	oracle := client.NewOracleClient(chainClient, priceCache)
 
 	// Submit a price
 	txHash, err := oracle.Submit(ctx, client.PriceUpdate{

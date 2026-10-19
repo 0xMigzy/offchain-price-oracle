@@ -1,0 +1,59 @@
+services:
+  anvil:
+    image: ghcr.io/foundry-rs/foundry:latest
+    ports:
+      - "8545:8545"
+    command: "'anvil --host 0.0.0.0'"
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  kafka:
+    image: bitnamilegacy/kafka:latest
+    ports:
+      - "9094:9094"
+    environment:
+      - KAFKA_CFG_NODE_ID=0
+      - KAFKA_CFG_PROCESS_ROLES=controller,broker
+      - KAFKA_CFG_LISTENERS=PLAINTEXT://:9092,CONTROLLER://:9093,EXTERNAL://:9094
+      - KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT://kafka:9092,EXTERNAL://localhost:9094
+      - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT,EXTERNAL:PLAINTEXT
+      - KAFKA_CFG_CONTROLLER_QUORUM_VOTERS=0@kafka:9093
+      - KAFKA_CFG_CONTROLLER_LISTENER_NAMES=CONTROLLER
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions.sh", "--bootstrap-server", "localhost:9092"]
+      interval: 10s
+      timeout: 20s
+      retries: 10
+      start_period: 20s
+
+  kafka-init:
+    image: bitnamilegacy/kafka:latest
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ["kafka-topics.sh"]
+    command: ["--bootstrap-server", "kafka:9092", "--create", "--if-not-exists", "--topic", "oracle-jobs", "--partitions", "1", "--replication-factor", "1"]
+
+  worker:
+    build: ./worker
+    restart: on-failure
+    depends_on:
+      anvil:
+        condition: service_started
+      redis:
+        condition: service_started
+      kafka:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    env_file: .env
+    environment:
+      RPC_URL: http://anvil:8545
+      REDIS_ADDR: redis:6379
+      KAFKA_BROKERS: kafka:9092
+      # CONTRACT_ADDRESS and PRIVATE_KEY supplied via .env
+    ports:
+      - "8080:8080"
