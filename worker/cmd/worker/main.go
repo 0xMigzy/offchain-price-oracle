@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/0xmigzy/capstone-worker/internal/api"
 	"github.com/0xmigzy/capstone-worker/internal/cache"
 	"github.com/0xmigzy/capstone-worker/internal/chain"
 	"github.com/0xmigzy/capstone-worker/internal/client"
@@ -48,11 +49,16 @@ func main() {
 
 	w := worker.NewWorker(oracle, priceCache, consumer)
 
+	producer := queue.NewProducer(brokers, kafkaTopic)
+	s := api.NewServer(producer)
+	mux := healthMux()
+	s.Routes(mux)
+
 	ln, err := net.Listen("tcp", httpAddr)
 	if err != nil {
 		log.Fatalf("http listen %s: %v", httpAddr, err)
 	}
-	srv := &http.Server{Handler: healthMux(), ReadHeaderTimeout: 5 * time.Second}
+	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	srvErr := make(chan error, 1)
 	go func() {
 		if err := srv.Serve(ln); !errors.Is(err, http.ErrServerClosed) {
@@ -71,6 +77,9 @@ func main() {
 	defer cancel()
 	if serr := srv.Shutdown(shutdownCtx); serr != nil {
 		log.Printf("http shutdown: %v", serr)
+	}
+	if perr := producer.Close(); perr != nil {
+		log.Printf("close producer: %v", perr)
 	}
 	select {
 	case serr := <-srvErr:
