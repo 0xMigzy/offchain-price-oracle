@@ -4,7 +4,7 @@ set -euo pipefail
 : "${PRIVATE_KEY:?set PRIVATE_KEY to the deployer private key}"
 
 echo "==> bringing up infra"
-docker compose up -d anvil redis kafka
+docker compose up -d anvil redis
 
 echo "==> waiting for anvil"
 until curl -s http://localhost:8545 > /dev/null; do sleep 1; done

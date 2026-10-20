@@ -5,6 +5,9 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"math/big"
+	"time"
+
+	"github.com/ethereum/go-ethereum/core/types"
 
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
@@ -20,6 +23,7 @@ type Client struct {
 	contract   *oracleconsumer.Oracleconsumer
 	transactor *bind.TransactOpts
 	address    common.Address
+	chainID    *big.Int
 }
 
 // NewClient creates a new chain client.
@@ -29,6 +33,9 @@ func NewClient(
 	contractAddress string,
 	privateKeyHex string,
 ) (*Client, error) {
+	if !common.IsHexAddress(contractAddress) {
+		return nil, fmt.Errorf("invalid contract address")
+	}
 	eth, err := ethclient.DialContext(ctx, rpcURL)
 	if err != nil {
 		return nil, fmt.Errorf("dial RPC: %w", err)
@@ -61,6 +68,7 @@ func NewClient(
 	}
 
 	return &Client{
+		chainID:    chainID,
 		eth:        eth,
 		contract:   contract,
 		transactor: transactor,
@@ -94,4 +102,36 @@ func (c *Client) GetLatestPrice(ctx context.Context, pair string) (*big.Int, uin
 // Address returns the address this client is using to sign transactions.
 func (c *Client) Address() common.Address {
 	return c.address
+}
+
+func (c *Client) NetworkID() uint64 { return c.chainID.Uint64() }
+
+// PreparePrice signs without broadcasting, allowing durable job recovery before
+// any externally visible side effect.
+func (c *Client) PreparePrice(ctx context.Context, pair string, price *big.Int) (*types.Transaction, error) {
+	opts := *c.transactor
+	opts.Context = ctx
+	opts.NoSend = true
+	return c.contract.SubmitPrice(&opts, pair, price)
+}
+
+func (c *Client) Broadcast(ctx context.Context, tx *types.Transaction) error {
+	return c.eth.SendTransaction(ctx, tx)
+}
+
+func (c *Client) Receipt(ctx context.Context, hash common.Hash) (*types.Receipt, error) {
+	return c.eth.TransactionReceipt(ctx, hash)
+}
+
+func (c *Client) TransactionKnown(ctx context.Context, hash common.Hash) (bool, error) {
+	_, _, err := c.eth.TransactionByHash(ctx, hash)
+	return err == nil, err
+}
+
+func (c *Client) ChainID(ctx context.Context) (*big.Int, error) { return c.eth.ChainID(ctx) }
+func (c *Client) Close()                                        { c.eth.Close() }
+
+// RPCContext bounds individual operations while preserving shutdown cancellation.
+func RPCContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(ctx, 15*time.Second)
 }

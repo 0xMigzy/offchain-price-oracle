@@ -70,10 +70,7 @@ func (rl *RateLimiter) cleanup() {
 }
 
 func clientIP(r *http.Request) string {
-	// X-Forwarded-For if behind a proxy, else RemoteAddr
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		return xff
-	}
+	// Only trust the socket peer; public clients can forge forwarded headers.
 	host, _, _ := net.SplitHostPort(r.RemoteAddr)
 	return host
 }

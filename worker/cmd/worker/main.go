@@ -15,16 +15,12 @@ import (
 	"github.com/0xmigzy/capstone-worker/internal/api"
 	"github.com/0xmigzy/capstone-worker/internal/cache"
 	"github.com/0xmigzy/capstone-worker/internal/chain"
-	"github.com/0xmigzy/capstone-worker/internal/client"
 	"github.com/0xmigzy/capstone-worker/internal/queue"
 	"github.com/0xmigzy/capstone-worker/internal/worker"
 )
 
 const (
-	kafkaTopic   = "oracle-jobs"
-	kafkaGroupID = "oracle-worker"
 	cacheTTL     = 10 * time.Second
-	httpAddr     = "0.0.0.0:8080"
 	httpShutdown = 5 * time.Second
 )
 
@@ -35,22 +31,51 @@ func main() {
 	rpcURL := mustEnv("RPC_URL")
 	contractAddr := mustEnv("CONTRACT_ADDRESS")
 	privateKey := strings.TrimPrefix(mustEnv("PRIVATE_KEY"), "0x")
-	redisAddr := mustEnv("REDIS_ADDR")
-	brokers := strings.Split(mustEnv("KAFKA_BROKERS"), ",")
+	redisURL := os.Getenv("REDIS_URL")
+	redisAddr := os.Getenv("REDIS_ADDR")
+	if redisURL == "" && redisAddr == "" {
+		log.Fatal("REDIS_URL or REDIS_ADDR is required")
+	}
+	token := os.Getenv("BACKEND_API_TOKEN")
+	if token == "" && os.Getenv("ALLOW_UNAUTHENTICATED_LOCAL") != "true" {
+		log.Fatal("BACKEND_API_TOKEN is required (local-only opt out: ALLOW_UNAUTHENTICATED_LOCAL=true)")
+	}
+	if os.Getenv("RAILWAY_ENVIRONMENT_ID") != "" && token == "" {
+		log.Fatal("hosted deployment requires BACKEND_API_TOKEN")
+	}
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+	httpAddr := net.JoinHostPort("0.0.0.0", port)
 
-	chainClient, err := chain.NewClient(ctx, rpcURL, contractAddr, privateKey)
+	startupCtx, startupCancel := chain.RPCContext(ctx)
+	chainClient, err := chain.NewClient(startupCtx, rpcURL, contractAddr, privateKey)
+	startupCancel()
 	if err != nil {
 		log.Fatalf("create chain client: %v", err)
 	}
 
-	priceCache := cache.NewPriceCache(redisAddr, cacheTTL)
-	oracle := client.NewOracleClient(chainClient, priceCache)
-	consumer := queue.NewConsumer(brokers, kafkaTopic, kafkaGroupID)
+	defer chainClient.Close()
+	if os.Getenv("RAILWAY_ENVIRONMENT_ID") != "" && chainClient.NetworkID() != 11155111 {
+		log.Fatal("hosted demo requires Sepolia chain ID 11155111")
+	}
+	var priceCache *cache.PriceCache
+	if redisURL != "" {
+		priceCache, err = cache.NewPriceCacheURL(redisURL, cacheTTL)
+		if err != nil {
+			log.Fatalf("create Redis client: %v", err)
+		}
+	} else {
+		priceCache = cache.NewPriceCache(redisAddr, cacheTTL)
+	}
+	defer priceCache.Close()
+	consumer := queue.NewConsumer(priceCache.RedisClient())
 
-	w := worker.NewWorker(oracle, priceCache, consumer)
+	w := worker.NewWorker(chainClient, priceCache, consumer)
 
-	producer := queue.NewProducer(brokers, kafkaTopic)
-	s := api.NewServer(producer)
+	producer := queue.NewProducer(priceCache)
+	s := api.NewServer(producer, priceCache, chainClient, token, contractAddr)
 	mux := healthMux()
 	s.Routes(mux)
 
@@ -58,7 +83,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("http listen %s: %v", httpAddr, err)
 	}
-	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 20 * time.Second, WriteTimeout: 25 * time.Second, IdleTimeout: 60 * time.Second}
 	srvErr := make(chan error, 1)
 	go func() {
 		if err := srv.Serve(ln); !errors.Is(err, http.ErrServerClosed) {
@@ -68,25 +93,20 @@ func main() {
 	}()
 	log.Printf("http listening on %s", httpAddr)
 
-	log.Printf("worker started: brokers=%v topic=%s group=%s", brokers, kafkaTopic, kafkaGroupID)
+	log.Printf("worker started: queue=redis-streams stream=%s", cache.QueueStream)
 	err = w.Run(ctx)
-	if cerr := consumer.Close(); cerr != nil {
-		log.Printf("close consumer: %v", cerr)
-	}
+	stop()
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), httpShutdown)
 	defer cancel()
 	if serr := srv.Shutdown(shutdownCtx); serr != nil {
 		log.Printf("http shutdown: %v", serr)
-	}
-	if perr := producer.Close(); perr != nil {
-		log.Printf("close producer: %v", perr)
 	}
 	select {
 	case serr := <-srvErr:
 		log.Fatalf("http server: %v", serr)
 	default:
 	}
-	if err != nil && ctx.Err() == nil {
+	if err != nil && !errors.Is(err, context.Canceled) {
 		log.Fatalf("worker: %v", err)
 	}
 	log.Printf("worker stopped")

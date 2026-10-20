@@ -23,9 +23,23 @@ type CachedPrice struct {
 }
 
 func NewPriceCache(addr string, ttl time.Duration) *PriceCache {
-	client := redis.NewClient(&redis.Options{Addr: addr})
+	client := redis.NewClient(&redis.Options{Addr: addr, ContextTimeoutEnabled: true})
 	return &PriceCache{client: client, ttl: ttl}
 }
+
+// NewPriceCacheURL supports authenticated redis:// and TLS rediss:// endpoints.
+func NewPriceCacheURL(rawURL string, ttl time.Duration) (*PriceCache, error) {
+	opts, err := redis.ParseURL(rawURL)
+	if err != nil {
+		return nil, fmt.Errorf("parse Redis URL: %w", err)
+	}
+	opts.ContextTimeoutEnabled = true
+	return &PriceCache{client: redis.NewClient(opts), ttl: ttl}, nil
+}
+
+func (c *PriceCache) Ping(ctx context.Context) error { return c.client.Ping(ctx).Err() }
+func (c *PriceCache) Close() error                   { return c.client.Close() }
+func (c *PriceCache) RedisClient() *redis.Client     { return c.client }
 
 func (c *PriceCache) Get(ctx context.Context, pair string) (*big.Int, uint64, bool, error) {
 	val, err := c.client.Get(ctx, key(pair)).Bytes()
